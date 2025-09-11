@@ -1,0 +1,24 @@
+{
+  "name": "ipns-deploy-action",
+  "version": "1.0.0",
+  "description": "GitHub Action for deploying to IPFS via Pinata and publishing IPNS records",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "upload": "node scripts/upload.js",
+    "pin": "node scripts/pin.js",
+    "cleanup": "node scripts/cleanup.js",
+    "publish": "node scripts/publish.js"
+  },
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@helia/http": "^2.2.1",
+    "@helia/ipns": "^8.2.4",
+    "pinata": "^2.4.9",
+    "multiformats": "^13.4.0",
+    "uint8arrays": "^5.1.0",
+    "ipns": "^10.1.2",
+    "@libp2p/peer-id": "^4.2.4",
+    "@libp2p/crypto": "^4.1.8"
+  }
+}

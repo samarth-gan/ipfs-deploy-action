@@ -1,0 +1,94 @@
+name: 'IPNS Deploy'
+description: 'Deploy static sites to IPFS via Pinata and publish IPNS records'
+author: 'Your Name'
+
+inputs:
+  folder_path:
+    description: 'Path to the folder to deploy'
+    required: true
+    default: './dist'
+  folder_name:
+    description: 'Name for the deployment (defaults to repository name)'
+    required: true
+  ipns_private_key:
+    description: 'Base64 encoded IPNS private key'
+    required: true
+    type: secret
+  pinata_gateway:
+    description: 'Pinata gateway URL'
+    required: true
+    type: secret
+  pinata_jwt:
+    description: 'Pinata JWT token'
+    required: true
+    type: secret
+  quicknode_api_key:
+    description: 'QuickNode API key'
+    required: true
+    type: secret
+  node_version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+
+outputs:
+  cid:
+    description: 'The CID of the deployed content'
+    value: ${{ steps.ipfs-deploy.outputs.cid }}
+  ipns_name:
+    description: 'The IPNS name for the deployment'
+    value: ${{ steps.ipns-publish.outputs.ipns_name }}
+  
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node_version }}
+
+    - name: Install IPNS Deploy dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm install
+
+    - name: Deploy to Pinata
+      id: ipfs-deploy
+      shell: bash
+      env:
+        FOLDER_PATH: ${{ inputs.folder_path }}
+        FOLDER_NAME: ${{ inputs.folder_name || github.event.repository.name }}
+        PINATA_GATEWAY: ${{ inputs.pinata_gateway }}
+        PINATA_JWT: ${{ inputs.pinata_jwt }}
+      run: node ${{ github.action_path }}/scripts/upload.js
+
+    - name: Pin on QuickNode
+      id: ipfs-pin
+      shell: bash
+      env:
+        CID: ${{ steps.ipfs-deploy.outputs.cid }}
+        FOLDER_NAME: ${{ inputs.folder_name }}
+        QUICKNODE_API_KEY: ${{ inputs.quicknode_api_key }}
+      run: node ${{ github.action_path }}/scripts/pin.js
+
+    - name: Remove from Pinata
+      id: ipfs-cleanup
+      shell: bash
+      env:
+        CID: ${{ steps.ipfs-deploy.outputs.cid }}
+        PINATA_GATEWAY: ${{ inputs.pinata_gateway }}
+        PINATA_JWT: ${{ inputs.pinata_jwt }}
+      run: node ${{ github.action_path }}/scripts/cleanup.js
+
+    - name: Publish IPNS Record
+      id: ipns-publish
+      shell: bash
+      env:
+        CID: ${{ steps.ipfs-deploy.outputs.cid }}
+        IPNS_PRIVATE_KEY: ${{ inputs.ipns_private_key }}
+      run: node ${{ github.action_path }}/scripts/publish.js
+
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
