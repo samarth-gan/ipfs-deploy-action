@@ -1,93 +1,93 @@
-import { createHeliaHTTP } from '@helia/http'
-import { ipns as ipnsConstructor } from '@helia/ipns'
-import { CID } from 'multiformats/cid'
-import { peerIdFromPrivateKey } from '@libp2p/peer-id'
-import { base36 } from 'multiformats/bases/base36';
-import { privateKeyFromProtobuf } from '@libp2p/crypto/keys'
-import { fromString as uint8ArrayFromString } from 'uint8arrays/from-string'
-import { createIPNSRecord, marshalIPNSRecord, multihashToIPNSRoutingKey } from 'ipns'
+import { PinataSDK } from 'pinata'
+import fs from 'fs'
 import * as core from '@actions/core'
 
-const DEFAULT_TTL_MS = 60 * 1000 // 1 min
-const DEFAULT_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000 // 1 year
-
-function getIPNSNameFromKeypair(privateKey) {
-  if (!privateKey) return ''
-  return peerIdFromPrivateKey(privateKey).toCID().toString(base36)
-}
-
-async function publishIPNSRecord() {
-  let helia
-  try {
-    const cidString = process.env.CID
-    const privateKeyBase64 = process.env.IPNS_PRIVATE_KEY
-
-    console.log(`🌐 Publishing IPNS record...`)
+async function readDirectoryRecursively(dirPath) {
+  const files = []
+  const path = await import('path')
+  
+  function readDirRecursive(currentPath, relativePath = '') {
+    const items = fs.readdirSync(currentPath, { withFileTypes: true })
     
-    helia = await createHeliaHTTP()
-    const ipns = ipnsConstructor(helia)
-    
-    const keypair = privateKeyFromProtobuf(uint8ArrayFromString(privateKeyBase64, 'base64'))
-    if (keypair.type !== 'Ed25519') {
-      throw new Error('Only libp2p Ed25519 keys are supported')
-    }
-    
-    const cid = CID.parse(cidString)
-    
-    const ipnsName = getIPNSNameFromKeypair(keypair)
-    
-    // Use timestamp-based sequence number to ensure it's always incrementing
-    const sequenceNumber = BigInt(Date.now())
-    
-    const ttlMs = DEFAULT_TTL_MS
-    const lifetime = DEFAULT_LIFETIME_MS
-    
-    console.log(`Publishing IPNS record for: ${ipnsName}, cid: ${cidString}, sequence: ${sequenceNumber}`)
-    
-    const record = await createIPNSRecord(keypair, cid, sequenceNumber, lifetime, {
-      ttlNs: BigInt(ttlMs) * 1_000_000n // ns
-    })
-    
-    const marshaledRecord = marshalIPNSRecord(record)
-    const routingKey = multihashToIPNSRoutingKey(keypair.publicKey.toMultihash())
-    
-    await ipns.localStore.put(routingKey, marshaledRecord, {})
-    await helia.routing.put(routingKey, marshaledRecord)
-    
-    const ipfsUrl = `https://ipfs.io/ipns/${ipnsName}`
-    
-    console.log('✅ IPNS Record published successfully to DHT!')
-    console.log('- IPNS Name:', ipnsName)
-    console.log('- IPFS URL:', ipfsUrl)
-    console.log('- The record should be resolvable for the next 48 hours (DHT expiration interval)')
-    console.log('- Value:', record.value)
-    console.log('- Validity:', record.validity)
-    console.log('- Sequence:', record.sequence.toString())
-
-    // Set outputs
-    core.setOutput('ipns_name', ipnsName)
-    core.setOutput('ipfs_url', ipfsUrl)
-    
-    return {
-      record,
-      ipnsName,
-      keypair
-    }
-  } catch (error) {
-    console.error('❌ Error publishing IPNS record:', error.message)
-    core.setFailed(error.message)
-    throw error
-  } finally {
-    // Always stop Helia to allow process to exit
-    if (helia) {
-      try {
-        await helia.stop()
-        console.log('🔌 Helia instance stopped')
-      } catch (stopError) {
-        console.warn('Warning: Error stopping Helia:', stopError.message)
+    for (const item of items) {
+      const fullPath = path.join(currentPath, item.name)
+      const itemRelativePath = relativePath ? `${relativePath}/${item.name}` : item.name
+      
+      if (item.isDirectory()) {
+        readDirRecursive(fullPath, itemRelativePath)
+      } else if (item.isFile()) {
+        const fileContent = fs.readFileSync(fullPath)
+        const file = new File([fileContent], itemRelativePath, {
+          type: getMimeType(item.name)
+        })
+        files.push(file)
       }
     }
   }
+  
+  readDirRecursive(dirPath)
+  return files
 }
 
-publishIPNSRecord()
+function getMimeType(filename) {
+  const ext = filename.split('.').pop()?.toLowerCase()
+  const mimeTypes = {
+    'html': 'text/html',
+    'css': 'text/css',
+    'js': 'application/javascript',
+    'json': 'application/json',
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'svg': 'image/svg+xml',
+    'txt': 'text/plain',
+    'md': 'text/markdown'
+  }
+  return mimeTypes[ext] || 'application/octet-stream'
+}
+
+async function uploadFolderToPinata() {
+  try {
+    const folderPath = process.env.FOLDER_PATH
+    const folderName = process.env.FOLDER_NAME //context.betn.io
+    const pinataGateway = process.env.PINATA_GATEWAY
+    const pinataJwt = process.env.PINATA_JWT
+
+    console.log(`📁 Uploading folder ${folderPath} to Pinata...`)
+    
+    const pinata = new PinataSDK({
+      pinataGateway: pinataGateway,
+      pinataJwt: pinataJwt,
+    });
+    
+    await pinata.testAuthentication()
+    console.log('✅ Pinata authentication successful')
+    
+    const options = {
+      metadata: {
+        name: folderName, 
+      }
+    }
+
+    const files = await readDirectoryRecursively(folderPath)
+    console.log(`Found ${files.length} files to upload`)
+    
+    const result = await pinata.upload.public.fileArray(files, options).name(folderName);
+    console.log(`✅ Folder uploaded to Pinata successfully!`)
+    console.log(`- CID: ${result.cid}`)
+    console.log(`- Size: ${result.size} bytes`)
+    console.log(`- Name: ${result.name}`)
+    
+    // Set output for next steps
+    core.setOutput('cid', result.cid)
+    
+    return result.cid
+  } catch (error) {
+    console.error('❌ Error uploading to Pinata:', error.message)
+    core.setFailed(error.message)
+    throw error
+  }
+}
+
+uploadFolderToPinata()

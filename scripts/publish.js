@@ -9,7 +9,7 @@ import { createIPNSRecord, marshalIPNSRecord, multihashToIPNSRoutingKey } from '
 import * as core from '@actions/core'
 
 const DEFAULT_TTL_MS = 60 * 1000 // 1 min
-const DEFAULT_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000 // 1 week
+const DEFAULT_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000 // 1 year
 
 function getIPNSNameFromKeypair(privateKey) {
   if (!privateKey) return ''
@@ -17,13 +17,14 @@ function getIPNSNameFromKeypair(privateKey) {
 }
 
 async function publishIPNSRecord() {
+  let helia
   try {
     const cidString = process.env.CID
     const privateKeyBase64 = process.env.IPNS_PRIVATE_KEY
 
     console.log(`🌐 Publishing IPNS record...`)
     
-    const helia = await createHeliaHTTP()
+    helia = await createHeliaHTTP()
     const ipns = ipnsConstructor(helia)
     
     const keypair = privateKeyFromProtobuf(uint8ArrayFromString(privateKeyBase64, 'base64'))
@@ -76,6 +77,16 @@ async function publishIPNSRecord() {
     console.error('❌ Error publishing IPNS record:', error.message)
     core.setFailed(error.message)
     throw error
+  } finally {
+    // Always stop Helia to allow process to exit
+    if (helia) {
+      try {
+        await helia.stop()
+        console.log('🔌 Helia instance stopped')
+      } catch (stopError) {
+        console.warn('Warning: Error stopping Helia:', stopError.message)
+      }
+    }
   }
 }
 
